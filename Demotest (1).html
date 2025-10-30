@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Crossy Road 2D — Leaderboard</title>
+  <style>
+    :root{--bg:#87ceeb;--road:#333;--grass:#50c878;--player:#ffcc00;--car:#ff4444;--text:#111}
+    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans",Arial;text-align:center;}
+    canvas{background:var(--bg);box-shadow:0 10px 30px rgba(0,0,0,.2);border-radius:8px;display:block;margin:auto;}
+    .controls button{margin:6px;padding:10px 16px;font-size:16px;border:none;border-radius:6px;background:#444;color:#fff;cursor:pointer;}
+    .controls button:hover{background:#666;}
+    .ui{position:fixed;left:12px;top:12px;color:var(--text)}
+    .ui p{margin:4px 0;font-size:14px}
+    /* สไตล์สำหรับหน้าจอ GAME OVER */
+    #game-over-screen {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.8);
+        color: white;
+        display: none; /* ซ่อนไว้ก่อน */
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+    }
+    #game-over-screen h1 { margin-bottom: 5px; font-size: 40px; }
+    #game-over-screen p { margin-top: 5px; font-size: 24px; }
+    #leaderboard-list { 
+        list-style: none; 
+        padding: 0; 
+        font-size: 18px; 
+        margin-top: 20px;
+        width: 250px;
+        text-align: left;
+    }
+    #leaderboard-list li {
+        background: #333;
+        padding: 8px;
+        margin-bottom: 4px;
+        border-radius: 4px;
+        display: flex;
+        justify-content: space-between;
+    }
+    #leaderboard-list .top-score { color: #ffcc00; font-weight: bold; }
+
+  </style>
+</head>
+<body>
+  <h2>Crossy Road 2D Game</h2>
+  <canvas id="game" width="600" height="500"></canvas>
+  <div class="ui">
+    <p id="score">Score: 0</p>
+    <p id="lives">Lives: 1</p>
+  </div>
+  <div class="controls">
+    <button onclick="moveUp()">UP</button><br>
+    <button onclick="moveLeft()">LEFT</button>
+    <button onclick="moveRight()">RIGHT</button><br>
+    <button onclick="moveDown()">DOWN</button>
+  </div>
+    
+    <div id="game-over-screen">
+        <h1>GAME OVER</h1>
+        <p>Final Score: <span id="final-score">0</span></p>
+
+        <h3>🏆 TOP 5 SCORES 🏆</h3>
+        <ol id="leaderboard-list"></ol>
+
+        <button onclick="startGame()" style="margin-top: 20px; padding: 10px 20px; font-size: 18px; background: #ffcc00; color: #333; border: none; border-radius: 6px; cursor: pointer;">
+            START NEW GAME
+        </button>
+    </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+
+    // DOM Elements
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const finalScoreDisplay = document.getElementById('final-score');
+    const leaderboardList = document.getElementById('leaderboard-list');
+
+    const laneHeight = 80;
+    const playerSize = 40;
+
+    // --- GAME STATE VARIABLES ---
+    // lives = 1: โดนชน 1 ครั้งเกมโอเวอร์ทันที
+    // running = false เพื่อให้เกมหยุดจนกว่าจะเรียก startGame()
+    let score = 0, lives = 1, running = false; 
+    let maxScoreY = H; 
+
+    // Player Object
+    const player = { x: W/2 - 20, y: H - 60, w: playerSize, h: playerSize, step: 10 }; 
+    let cars = [];
+
+    // --- LEADERBOARD FUNCTIONS ---
+    function getLeaderboard() {
+        const scores = localStorage.getItem('crossyRoadScores');
+        return scores ? JSON.parse(scores) : [];
+    }
+
+    function saveScore(newScore) {
+        const scores = getLeaderboard();
+        scores.push(newScore);
+        scores.sort((a, b) => b - a);
+        const top5 = scores.slice(0, 5);
+        localStorage.setItem('crossyRoadScores', JSON.stringify(top5));
+        return top5;
+    }
+
+    function renderLeaderboard(scores, currentScore) {
+        leaderboardList.innerHTML = '';
+        scores.forEach((s, index) => {
+            const li = document.createElement('li');
+            li.innerHTML = `
+                <span>#${index + 1}</span>
+                <span>${s}</span>
+            `;
+            if (s === currentScore && index < 5 && li.classList.length === 0) { 
+                li.classList.add('top-score');
+            }
+            leaderboardList.appendChild(li);
+        });
+    }
+
+    // --- GAME CONTROL FUNCTIONS ---
+    
+    function resetPlayer(){ 
+        player.x = W/2 - 20; 
+        player.y = H - 60; 
+        maxScoreY = H; 
+    }
+
+    function spawnCars(){
+        cars = [];
+        for(let i=0; i < H/laneHeight; i++){
+            const y = i * laneHeight;
+            if(i > 0 && i < H/laneHeight - 1){ 
+                for(let j=0;j<4;j++){ 
+                    cars.push({
+                        x: Math.random()*W, 
+                        y, 
+                        w:60, 
+                        h:40, 
+                        v:(Math.random()>0.5?1:-1)*(100 + Math.random()*100) 
+                    });
+                }
+            }
+        }
+    }
+
+    // ⭐ ฟังก์ชันเริ่มเกมใหม่ (ไม่รีเซ็ตคะแนน)
+    function startGame() {
+        // ไม่รีเซ็ต score
+        lives = 1; // รีเซ็ตชีวิต
+        running = true; // เริ่มเกม
+        
+        document.getElementById('score').textContent = 'Score: ' + score;
+        document.getElementById('lives').textContent = 'Lives: ' + lives;
+        
+        resetPlayer(); // รีเซ็ตตำแหน่งผู้เล่น
+        spawnCars(); // สร้างรถใหม่
+        
+        gameOverScreen.style.display = 'none'; // ซ่อนหน้าจอ Game Over
+        document.querySelectorAll('.controls button').forEach(btn => btn.disabled = false); // เปิดปุ่มควบคุม
+        
+        // ทำให้แน่ใจว่าลูปเกมทำงาน
+        if (!last) {
+            last = performance.now();
+            requestAnimationFrame(loop);
+        }
+    }
+
+    function showGameOver() {
+        // บันทึกและแสดงผลคะแนน
+        const topScores = saveScore(score);
+        finalScoreDisplay.textContent = score;
+        renderLeaderboard(topScores, score);
+        
+        // แสดงหน้าจอและหยุดเกม
+        gameOverScreen.style.display = 'flex';
+        running = false;
+        
+        // ทำให้ปุ่มควบคุมใช้งานไม่ได้
+        document.querySelectorAll('.controls button').forEach(btn => btn.disabled = true);
+    }
+
+    function hit(){
+      lives--; document.getElementById('lives').textContent='Lives: '+lives;
+      if(lives<=0){
+            showGameOver(); // แสดงหน้าจอ GAME OVER
+        } else {
+            // หากยังมีชีวิตเหลือ (ในโค้ดนี้ lives=1 เสมอ)
+            resetPlayer();
+        }
+    }
+
+    // --- GAME LOGIC ---
+
+    function intersect(a,b){
+      return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y;
+    }
+
+    function update(dt){
+      if(!running) return;
+      
+      for(const c of cars){
+        c.x += c.v * dt;
+        if(c.v>0 && c.x>W+80) c.x=-80;
+        if(c.v<0 && c.x<-80) c.x=W+80;
+        if(intersect(player,c)) hit();
+      }
+      
+      // การทำคะแนนเมื่อข้ามเลน
+      if(player.y + player.h < maxScoreY - laneHeight){
+          score++; 
+          document.getElementById('score').textContent='Score: '+score;
+          maxScoreY = player.y + player.h; 
+      }
+
+      // หากผู้เล่นไปถึงเส้นชัย (ขอบบนสุดของจอ)
+      if(player.y <= 0){
+          score++; 
+          document.getElementById('score').textContent='Score: '+score; 
+          resetPlayer();
+      }
+    }
+
+    function draw(){
+        if (!running) return; // ไม่วาดเฟรมเกมหลักเมื่อเกมจบ
+
+        ctx.clearRect(0,0,W,H);
+
+        // พื้นหลังถนนและสนามหญ้า
+        for(let i=0;i<H/laneHeight;i++){
+            ctx.fillStyle = (i%2===0)?'#333':'#50c878';
+            ctx.fillRect(0,i*laneHeight,W,laneHeight);
+        }
+
+        // วาดรถ
+        ctx.fillStyle='#ff4444';
+        cars.forEach(c=>ctx.fillRect(c.x,c.y,c.w,c.h));
+
+        // วาดหน้าตัวตลก (แทน player เดิม)
+        const cx = player.x + player.w/2;
+        const cy = player.y + player.h/2;
+        const r = player.w/2;
+
+        // หน้า (วงกลม)
+        ctx.beginPath();
+        ctx.fillStyle = '#ffcc00';
+        ctx.arc(cx, cy, r, 0, Math.PI*2);
+        ctx.fill();
+
+        // ตา
+        ctx.beginPath();
+        ctx.fillStyle = '#000';
+        ctx.arc(cx - r/3, cy - r/3, r/6, 0, Math.PI*2);
+        ctx.arc(cx + r/3, cy - r/3, r/6, 0, Math.PI*2);
+        ctx.fill();
+
+        // จมูก (สีแดง)
+        ctx.beginPath();
+        ctx.fillStyle = '#ff0000';
+        ctx.arc(cx, cy, r/5, 0, Math.PI*2);
+        ctx.fill();
+
+        // ปาก (โค้งยิ้ม)
+        ctx.beginPath();
+        ctx.strokeStyle = '#cc0000';
+        ctx.lineWidth = 3;
+        ctx.arc(cx, cy + r/4, r/2.5, 0, Math.PI, false);
+        ctx.stroke();
+    }
+
+
+    // --- GAME LOOP ---
+    
+    let last = 0; // ตัวแปรสำหรับคำนวณเวลา
+
+    function loop(t){
+        if (!running) {
+            // เมื่อเกมจบ (running=false) ให้รีเซ็ต last เพื่อป้องกันการคำนวณ dt มากเกินไปเมื่อเริ่มใหม่
+            last = t; 
+            // ยังคงเรียก requestAnimationFrame เพื่อให้ลูปทำงานต่อไปและพร้อมสำหรับ startGame()
+            requestAnimationFrame(loop); 
+            return;
+        }
+        const dt=(t-last)/1000; last=t;
+        update(dt); 
+        draw();
+        requestAnimationFrame(loop);
+    }
+    
+    // ⭐ เริ่มเกมครั้งแรก
+    startGame();
+
+
+    // === Button Movement Functions ===
+    function moveUp(){ if(!running) return; player.y -= player.step; limitPlayer(); }
+    function moveDown(){ if(!running) return; player.y += player.step; limitPlayer(); }
+    function moveLeft(){ if(!running) return; player.x -= player.step; limitPlayer(); }
+    function moveRight(){ if(!running) return; player.x += player.step; limitPlayer(); }
+
+    function limitPlayer(){
+      if(player.x < 0) player.x = 0;
+      if(player.x + player.w > W) player.x = W - player.w;
+      if(player.y < 0) player.y = 0;
+      if(player.y + player.h > H) player.y = H - player.h;
+    }
+    
+    // การควบคุมด้วยปุ่มลูกศร
+    document.addEventListener('keydown', (e) => {
+        if (!running) return;
+        switch(e.key) {
+            case 'ArrowUp':
+            case 'w':
+                moveUp();
+                break;
+            case 'ArrowDown':
+            case 's':
+                moveDown();
+                break;
+            case 'ArrowLeft':
+            case 'a':
+                moveLeft();
+                break;
+            case 'ArrowRight':
+            case 'd':
+                moveRight();
+                break;
+        }
+    });
+  </script>
+</body>
+</html>
